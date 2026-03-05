@@ -30,7 +30,7 @@
   <button id="pasteBtn">?? 一键粘贴</button>
   <button id="parseBtn">?? 解析链接</button>
   <button id="copyBtn">?? 复制修正结果</button>
-  <button id="clearBtn">?? 清空</button>
+  <button id="clearBtn">??? 清空</button>
 </div>
 
 <div class="result" id="result"></div>
@@ -137,7 +137,17 @@ function render() {
   `;
 }
 
-// 粘贴
+// 核心解析逻辑封装（方便复用）
+function doParse() {
+  const text = document.getElementById("inputArea").value;
+  const found = extractEd2kLinks(text);
+  const parsed = parseLinks(found);
+  ed2kLinks.push(...parsed);
+  ed2kLinks = uniqueLinks(ed2kLinks);
+  render();
+}
+
+// 粘贴按钮
 document.getElementById("pasteBtn").addEventListener("click", async () => {
   const input = document.getElementById("inputArea");
   if (navigator.clipboard && navigator.clipboard.readText) {
@@ -145,6 +155,8 @@ document.getElementById("pasteBtn").addEventListener("click", async () => {
       const text = await navigator.clipboard.readText();
       input.value += "\n" + text;
       alert("? 已成功粘贴剪贴板内容！");
+      // 粘贴按钮触发的粘贴，也自动解析
+      doParse();
       return;
     } catch (err) {
       console.warn("无法读取剪贴板：", err);
@@ -154,14 +166,15 @@ document.getElementById("pasteBtn").addEventListener("click", async () => {
   input.focus();
 });
 
-// 解析按钮
-document.getElementById("parseBtn").addEventListener("click", () => {
-  const text = document.getElementById("inputArea").value;
-  const found = extractEd2kLinks(text);
-  const parsed = parseLinks(found);
-  ed2kLinks.push(...parsed);
-  ed2kLinks = uniqueLinks(ed2kLinks);
-  render();
+// 解析按钮（保留原有功能）
+document.getElementById("parseBtn").addEventListener("click", doParse);
+
+// 监听输入框的粘贴事件（核心新增逻辑）
+document.getElementById("inputArea").addEventListener("paste", (e) => {
+  // 延迟执行，确保粘贴内容已写入输入框
+  setTimeout(() => {
+    doParse();
+      }, 100);
 });
 
 // 复制按钮
@@ -185,7 +198,5 @@ document.getElementById("clearBtn").addEventListener("click", () => {
 
 render();
 </script>
-
-
 </body>
 </html>
