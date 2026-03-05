@@ -28,9 +28,9 @@
 
 <div class="btn-group">
   <button id="pasteBtn"> 一键粘贴</button>
-  <button id="parseBtn"> 解析链接</button>
-  <button id="copyBtn"> 复制修正结果</button>
-  <button id="clearBtn">清空</button>
+  <button id="parseBtn">解析链接</button>
+  <button id="copyBtn">复制修正结果</button>
+  <button id="clearBtn"> 清空</button>
 </div>
 
 <div class="result" id="result"></div>
@@ -38,49 +38,34 @@
 <script>
 let ed2kLinks = [];
 
-// 更稳健的 normalize（不删文件名中的空格，只去掉明显前缀噪音）
 function normalizeRawText(text) {
   return text
-    .replace(/(https?:\/\/|www\.[^\s]*@)/gi, "")  // 去掉前缀的网址/类似 www.xx@ 前缀干扰
-    .replace(/ed2k:\/\/\|\|/gi, "ed2k://|file|")  // 修复双竖线
-    .replace(/ed2k:\/\/\|文件\|/gi, "ed2k://|file|") // 中文“文件”修复
+    .replace(/(https?:\/\/|www\.[^\s]*@)/gi, "")
+    .replace(/ed2k:\/\/\|\|/gi, "ed2k://|file|")
+    .replace(/ed2k:\/\/\|文件\|/gi, "ed2k://|file|")
     .replace(/\r\n/g, "\n")
     .trim();
 }
 
-// 提取所有 ed2k 段（允许文件名内含空格/特殊字符），直到第一个出现的 "|/"
 function extractEd2kLinks(text) {
   text = normalizeRawText(text);
-  // 在每个 ed2k:// 前换行，便于分割（可选）
   text = text.replace(/(ed2k:\/\/)/gi, "\n$1");
-
-  // 用非贪心匹配，直到第一个出现的 "|/" 为止（支持跨空格、特殊字符）
   const regex = /(ed2k:\/\/\|[\s\S]*?\|\/)/gi;
   const matches = text.match(regex) || [];
   return matches.map(m => m.trim());
 }
 
-// 解析并只保留结构（隐藏/去掉文件名）
 function parseLinks(links) {
   const results = [];
   for (let raw of links) {
-    // 把可能的换行压平
     const fixed = raw.replace(/\r?\n/g, " ").trim();
-
-    // 去掉前缀 "ed2k://|" 和末尾 "|/"，得到中间主体
     let inner = fixed.replace(/^ed2k:\/\/\|/i, "").replace(/\|\s*\/$/i, "");
-    // split 出每项（注意文件名可能包含空格，但 '|' 是分隔符）
     const parts = inner.split("|");
-
-    // parts 的典型格式: ["file", "<filename>", "<size>", "<hash>"] 或者可能有略微差异
     if (parts.length >= 3) {
-      // 从尾部安全取 size 与 hash（避免文件名里含多余的 |）
       const hash = parts[parts.length - 1].trim();
-      const size = parts[parts.length - 2].trim().replace(/[^\d]/g, ""); // 只保留数字
-      // 验证基本格式：size 为数字，hash 是 16/32/40/等十六进制长度（宽松判断）
+      const size = parts[parts.length - 2].trim().replace(/[^\d]/g, "");
       const sizeOk = /^\d+$/.test(size);
       const hashOk = /^[A-Fa-f0-9]+$/.test(hash);
-
       if (sizeOk && hashOk) {
         results.push({
           name: "(已隐藏文件名)",
@@ -88,25 +73,15 @@ function parseLinks(links) {
           link: `ed2k://|file||${size}|${hash}|/`
         });
       } else {
-        // 回退：如果无法识别，仍保存原始但做基础清理
-        results.push({
-          name: "(格式不规范)",
-          size: 0,
-          link: fixed
-        });
+        results.push({ name: "(格式不规范)", size: 0, link: fixed });
       }
     } else {
-      results.push({
-        name: "(格式不完整)",
-        size: 0,
-        link: fixed
-      });
+      results.push({ name: "(格式不完整)", size: 0, link: fixed });
     }
   }
   return results;
 }
 
-// 去重
 function uniqueLinks(arr) {
   const seen = new Set();
   return arr.filter(x => {
@@ -116,80 +91,57 @@ function uniqueLinks(arr) {
   });
 }
 
-// 渲染
 function render() {
   const resultDiv = document.getElementById("result");
   if (ed2kLinks.length === 0) {
     resultDiv.innerHTML = "<p>暂无解析结果。</p>";
     return;
   }
-
   const totalSize = ed2kLinks.reduce((sum, x) => sum + (x.size || 0), 0);
   const totalGB = totalSize > 0 ? (totalSize / (1024 ** 3)).toFixed(2) : "未知";
-
   resultDiv.innerHTML = `
     <p>共解析出 <span class="count">${ed2kLinks.length}</span> 条链接，总大小约 <span class="count">${totalGB} GB</span></p>
-    ${ed2kLinks.map(x => `
-      <div class="link-item">
-        <code>${x.link}</code>
-      </div>
-    `).join("")}
-  `;
+    ${ed2kLinks.map(x => `<div class="link-item"><code>${x.link}</code></div>`).join("")}`;
 }
 
-// 核心解析逻辑封装（方便复用）
+// ======================
+// 统一解析函数（不动你逻辑）
+// ======================
 function doParse() {
   const text = document.getElementById("inputArea").value;
   const found = extractEd2kLinks(text);
   const parsed = parseLinks(found);
-  ed2kLinks.push(...parsed);
-  ed2kLinks = uniqueLinks(ed2kLinks);
+  ed2kLinks = uniqueLinks([...ed2kLinks, ...parsed]);
   render();
 }
 
-// 粘贴按钮
-document.getElementById("pasteBtn").addEventListener("click", async () => {
-  const input = document.getElementById("inputArea");
-  if (navigator.clipboard && navigator.clipboard.readText) {
-    try {
-      const text = await navigator.clipboard.readText();
-      input.value += "\n" + text;
-      alert("? 已成功粘贴剪贴板内容！");
-      // 粘贴按钮触发的粘贴，也自动解析
-      doParse();
-      return;
-    } catch (err) {
-      console.warn("无法读取剪贴板：", err);
-    }
-  }
-  alert("?? 当前浏览器不支持自动粘贴，请手动长按输入框粘贴。");
-  input.focus();
+// ======================
+// 【手机兼容核心】监听输入变化，不管是粘贴还是输入都触发
+// ======================
+document.getElementById("inputArea").addEventListener("input", function () {
+  doParse();
 });
 
-// 解析按钮（保留原有功能）
 document.getElementById("parseBtn").addEventListener("click", doParse);
 
-// 监听输入框的粘贴事件（核心新增逻辑）
-document.getElementById("inputArea").addEventListener("paste", (e) => {
-  // 延迟执行，确保粘贴内容已写入输入框
-  setTimeout(() => {
-    doParse();
-      }, 100);
-});
-
-// 复制按钮
-document.getElementById("copyBtn").addEventListener("click", async () => {
-  if (ed2kLinks.length === 0) return alert("?? 没有可复制的链接。");
-  const all = ed2kLinks.map(x => x.link).join("\n");
+document.getElementById("pasteBtn").addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText(all);
-    alert("? 已复制修正后的链接！");
-  } catch {
-    alert("?? 复制失败，请手动选择文本复制。");
+    let text = await navigator.clipboard.readText();
+    document.getElementById("inputArea").value = text;
+    doParse();
+    alert("? 粘贴并自动解析成功");
+  } catch (e) {
+    alert("?? 请手动粘贴");
   }
 });
 
-// 清空按钮
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  if (ed2kLinks.length === 0) return alert("?? 暂无结果");
+  let txt = ed2kLinks.map(x => x.link).join("\n");
+  await navigator.clipboard.writeText(txt);
+  alert("? 复制成功");
+});
+
 document.getElementById("clearBtn").addEventListener("click", () => {
   ed2kLinks = [];
   document.getElementById("inputArea").value = "";
@@ -200,4 +152,3 @@ render();
 </script>
 </body>
 </html>
-
